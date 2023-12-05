@@ -1,0 +1,244 @@
+---
+title: "predicting the star rating"
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+date: "2023-12-04"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE, cache = TRUE)
+```
+
+```{r set-working-directory, echo=FALSE}
+setwd("C:/Users/u2040583/EC349-Assignment (2040583)")
+```
+
+# Github linking
+
+
+# Tabula statement
+We're part of an academic community at Warwick. 
+Whether studying, teaching, or researching, we’re all taking part in an expert conversation which 
+must meet standards of academic integrity. When we all meet these standards, we can take pride in 
+our own academic achievements, as individuals and as an academic community. 
+Academic integrity means committing to honesty in academic work, giving credit where we've used 
+others' ideas and being proud of our own achievements. 
+In submitting my work I confirm that: 
+1. I have read the guidance on academic integrity provided in the Student Handbook and understand 
+the University regulations in relation to Academic Integrity. I am aware of the potential 
+consequences of Academic Misconduct. 
+2. I declare that the work is all my own, except where I have stated otherwise. 
+3. No substantial part(s) of the work submitted here has also been submitted by me in other credit 
+bearing assessments courses of study (other than in certain cases of a resubmission of a piece of 
+work), and I acknowledge that if this has been done this may lead to an appropriate sanction. 
+4. Where a generative Artificial Intelligence such as ChatGPT has been used I confirm I have abided 
+by both the University guidance and specific requirements as set out in the Student Handbook and 
+the Assessment brief. I have clearly acknowledged the use of any generative Artificial Intelligence in 
+my submission, my reasoning for using it and which generative AI (or AIs) I have used. Except where 
+indicated the work is otherwise entirely my own. 
+5. I understand that should this piece of work raise concerns requiring investigation in relation to any 
+of points above, it is possible that other work I have submitted for assessment will be checked, even 
+if marks (provisional or confirmed) have been published. 
+6. Where a proof-reader, paid or unpaid was used, I confirm that the proofreader was made aware 
+of and has complied with the University’s proofreading policy. 
+7. I consent that my work may be submitted to Turnitin or other analytical technology. I understand 
+the use of this service (or similar), along with other methods of maintaining the integrity of the 
+academic process, will help the University uphold academic standards and assessment fairness. 
+Privacy statement 
+The data on this form relates to your submission of coursework. The date and time of your 
+submission, your identity, and the work you have submitted will be stored. We will only use this data 
+to administer and record your coursework submission. 
+Related articles 
+Reg. 11 Academic Integrity (from 4 Oct 2021)
+Guidance on Regulation 11
+Proofreading Policy 
+Education Policy and Quality Team
+Academic Integrity (warwick.ac.uk)
+
+
+# Introduction
+
+Yelp is a well-known online platform that offers reviews and recommendations for local businesses. These reviews, particularly the star ratings of businesses, play a crucial role in influencing consumer choices. This project aims to predict the star rating a customer gives to a business based on their review. To achieve this, the random forest method will be used to develop a predictive model.
+
+# Data Source
+
+The data for this project is sourced from the Yelp Open Dataset, which is available online (https://www.yelp.com/dataset). This dataset includes 1,987,897 users, 150,346 businesses, and 6,990,280 reviews. Due to the large size of the dataset, a smaller, random sample will be used, focusing primarily on user and review data. This subset will include user data with friend mappings and metadata, as well as review data, featuring the complete texts of reviews along with the associated user_id and business_id. This selection strategy is intended to balance the comprehensiveness of the data with the practicality of analysis.
+
+# Methodology
+
+Data Science methodology is a systematic approach for solving complex problems with data. This project employs the following key steps:
+
+## Business Understanding
+
+Identifying the problem, which in this case is predicting star ratings for local businesses.
+
+## Analytic Approach
+
+Choosing appropriate statistical and machine learning methods. This project utilizes predictive analytics for forecasting star ratings.
+
+## Data Understanding and Preparation
+
+Utilizing statistics and visualization to understand and prepare the data for analysis, ensuring it is clean and correctly formatted. We use text analysis to extract the keyword matrix of each text as the independent variable/
+
+## Modeling
+
+Choosing appropriate techniques, like random forest model, to analyze data and forecast outcomes. 
+
+## Evaluation
+
+Assessing the model's effectiveness and making necessary adjustments for accuracy.  
+
+# Analysis and results
+
+## Data clean
+
+We first load the review and user datasets, and then merge the two datasets into a new data based on the user_id. Next, we select stars, text, and average_stars for further analysis.
+
+
+```{r}
+library(tidyverse)
+library(flextable)
+library(corrplot)
+library(rpart)
+library(ranger)
+library(tm)
+library(caret)
+load("yelp_review_small.Rda")
+load("yelp_user_small.Rda")
+
+dat <- review_data_small %>%
+  inner_join(user_data_small, by = "user_id") %>%
+  select(c(4,8,19))
+```
+
+To compare the texts of different reviews, we perform text cleaning on the texts. We first replace the text with lowercase words, and then remove punctuation, pauses, and stems from the text. 
+
+```{r}
+corpus <- VCorpus(VectorSource(dat$text))
+corpus <- tm_map(corpus, content_transformer(tolower))
+corpus <- tm_map(corpus, removePunctuation)
+corpus <- tm_map(corpus, removeWords, stopwords("english"))
+corpus <- tm_map(corpus, stemDocument)
+```
+
+Next, we will create a document entry matrix, which includes 279878 rows and 279878 columns, with rows representing 279878 texts and columns representing 279878 words. This matrix is actually a sparse matrix with a sparsity rate of 100%. Due to the high sparsity rate of the sparse matrix, we will remove some words with extremely low frequency of occurrence. The sparse matrix after removing low frequencies is as follows:
+
+```{r}
+frequencies <- DocumentTermMatrix(corpus)
+sparse <- removeSparseTerms(frequencies, 0.8)
+reviewsSparse <- as.data.frame(as.matrix(sparse))
+colnames(reviewsSparse) <- make.names(colnames(reviewsSparse))
+```
+
+```{r}
+reviewsSparse %>%
+  head(n = 6) %>%
+  flextable() %>%
+  set_caption(caption = "Table 1: The data of reviwew sparse") %>%
+  font(fontname = "Calibri (Body)", part = "all") %>%
+  fontsize(size = 10, part = "all") %>%
+  theme_booktabs() %>%
+  autofit()
+```
+
+Finally, we integrated the entry matrix with the data and removed the text column from the data. The cleaned dataset is as follows:
+
+```{r}
+dat <- cbind(dat[,c(1,3)], reviewsSparse)
+```
+
+```{r}
+dat %>%
+  head(n = 6) %>%
+  flextable() %>%
+  set_caption(caption = "Table 2: The clean data of reviwew") %>%
+  font(fontname = "Calibri (Body)", part = "all") %>%
+  fontsize(size = 10, part = "all") %>%
+  theme_booktabs() %>%
+  autofit()
+```
+
+## Exploratory data analysis
+
+Next, we will analyze the relationship between different variables. Firstly, we visualize the relationship between the stars of reviews and the average stars of users through box plots. Through the box plot below, we found that the higher the stars, the larger the average stars of the review user.
+
+```{r}
+ggplot(dat, aes(as.factor(stars), average_stars, fill = as.factor(stars))) +
+  geom_boxplot() +
+  labs(x = "stars", fill = "stars", title = "Figure1: The relationship between review stars and user average stars") +
+  theme_bw()
+```
+
+Finally, we analyzed the relationship between different words and review stars, and visualized the correlation between word frequency and stars using heatmaps. Through the heatmap, we found that the frequency of stars and 'great' is positively correlated, and negatively correlated with 'order'.
+
+```{r}
+corrplot(cor(dat[,-2]), title = "Figure2: The relationship between different words and review stars", mar = c(0,0,1,0))
+```
+
+## Split the data
+
+To compare the performance of different models, we divided the dataset into training and testing sets, the testing sets have 10000 observations and the training sets have 269878 observations.
+
+```{r}
+set.seed(1)
+index <- sample(1:nrow(dat), 10000)
+test_dat <- dat[index,]
+train_dat <- dat[-index,]
+```
+
+We calculated the frequency of the stars in the segmented test set and training set, and plotted them into a bar graph. From the graph, it can be seen that the proportions of the two classifications in the grades are similar, regardless of whether it is the training set or the test set.
+
+```{r}
+ggplot(train_dat, aes(stars, fill = as.factor(stars))) +
+  geom_bar(stat = "count", width = 0.5) +
+  labs(title = "Fig 3: The barplot of stars(train)", 
+       fill = "stars") + 
+  theme_bw()
+```
+
+```{r}
+ggplot(test_dat, aes(stars, fill = as.factor(stars))) +
+  geom_bar(stat = "count", width = 0.5) +
+  labs(title = "Fig 4: The barplot of stars(test)", 
+       fill = "stars") + 
+  theme_bw()
+```
+
+## Build the model
+
+Random Forest is a classic bagging model, with its weak learner being the decision tree model. The random forest model randomly samples from the original dataset to form n different sample datasets, and then builds n different decision tree models based on these datasets. Finally, the final result is obtained based on the average value (for regression models) or voting (for classification models) of these decision tree models.
+
+The random forest model has high accuracy and can process high-dimensional data and perform feature selection. So we chose the method of random forest to build a supervised classification model.
+
+```{r}
+mod <- ranger(as.factor(stars)~., train_dat)
+```
+
+```{r}
+pred <- predict(mod, test_dat)$predictions
+cm <- confusionMatrix(factor(pred), factor(test_dat$stars), dnn = c("Prediction", "Reference"))
+plt <- as.data.frame(cm$table)
+plt$Prediction <- factor(plt$Prediction, levels=rev(levels(plt$Prediction)))
+
+ggplot(plt, aes(Prediction,Reference, fill= Freq)) +
+  geom_tile() + geom_text(aes(label=Freq)) +
+  scale_fill_gradient(low="white", high="#009194") +
+  labs(x = "Prediction",y = "Reference",title = "Figure5: The confusion matrix of model") +
+  scale_x_discrete(labels=c(5:1)) +
+  scale_y_discrete(labels=c(1:5))
+```
+
+We use the training set to build a random forest model, and then we use this model to predict the test set. The accuracy of the test set prediction is 0.5517. Finally, we calculated the confusion matrix of the predicted results and visualized the confusion matrix, as shown in the figure above. From the figure, we can see that the classification for low stars or high stars is the most accurate.
+
+# Discussion
+
+The biggest challenge of this analysis is that the key information in the data is text information. In order to build a supervised machine learning model, we need to convert text information into quantitative data. To overcome this problem, this analysis transformed the text into a matrix of word frequency, and then used this matrix as the independent variable to build a supervised machine learning model. This method effectively solves the problem of text classification.
+
+# Reference
+
+James, G. et al. (2013) An introduction to statistical learning: With applications in R. 1st ed. New York, NY: Springer.
+John B.Rollins. 2015. Foundational Methodology for Data Science. IBM Analytics White Paper.
+Yelp, Yelp Open Dataset [Online]. Available at: https://www.yelp.com/dataset
+
